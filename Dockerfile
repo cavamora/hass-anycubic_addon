@@ -12,7 +12,8 @@ WORKDIR /opt
 COPY mqtt_proxy/ /opt/mqtt_proxy/
 
 # Biblioteca Anycubic (reutilizada da integração)
-COPY ../../custom_components/anycubic_cloud/anycubic_cloud_api /opt/anycubic_cloud_api
+# Biblioteca Anycubic (agora dentro deste repositório)
+COPY mqtt_proxy/anycubic_cloud_api /opt/anycubic_cloud_api
 
 # Dependências Python
 RUN pip3 install --no-cache-dir -r /opt/mqtt_proxy/requirements.txt

@@ -50,3 +50,40 @@ Este add-on funciona como um proxy entre o MQTT da nuvem da Anycubic e o MQTT lo
 - O Dockerfile copia a biblioteca `anycubic_cloud_api` desta integração para dentro do container do add-on.
 - Dependências Python estão em `mqtt_proxy/requirements.txt`.
 
+## Instalação via repositório (Add-on Store)
+
+Pré-requisitos: use Home Assistant OS ou Supervised (o modo Container não suporta Add-ons do Supervisor).
+
+1. Publique este projeto em um repositório Git (por ex. GitHub) contendo os arquivos do add-on na raiz.
+   - Inclua `repository.json` na raiz com `name`, `url` e `maintainer`.
+   - Garanta que o Dockerfile seja auto-contido: a biblioteca `anycubic_cloud_api` precisa estar presente no build (ver observação abaixo).
+2. No Home Assistant: Abra Loja de Add-ons → menu (três pontos) → Repositórios → Adicionar repositório.
+3. Cole a URL do seu repositório Git e confirme.
+4. O add-on "Anycubic Cloud MQTT Proxy" deve aparecer na lista; instale e configure.
+
+### Observação importante sobre `anycubic_cloud_api`
+
+Este add-on reutiliza a biblioteca `anycubic_cloud_api` da integração. No `Dockerfile` atual, ela é copiada de um caminho relativo externo:
+
+```
+COPY ../../custom_components/anycubic_cloud/anycubic_cloud_api /opt/anycubic_cloud_api
+```
+
+Para que o repositório seja instalável por outras pessoas via Add-on Store, você deve:
+- Incluir a pasta `anycubic_cloud_api` dentro deste repositório (por exemplo, em `mqtt_proxy/anycubic_cloud_api`) e ajustar o `Dockerfile` para copiá-la a partir daqui; OU
+- Publicar `anycubic_cloud_api` como pacote Python e instalar via `pip` durante o build.
+
+Sem essa biblioteca no build, o container falhará ao iniciar.
+
+## Alternativa: Add-ons locais
+
+Se preferir sem publicar em GitHub:
+- Acesse o diretório de dados do Supervisor (via Samba/SSH) e copie este add-on para `/addons/anycubic_cloud_mqtt_proxy`.
+- Ative Modo Avançado, vá em Loja de Add-ons → "Add-ons locais" → instale.
+
+## Pós-instalação
+
+- Gere/obtenha os certificados TLS da Anycubic e coloque-os em `/data/ssl/anycubic` do add-on.
+- Verifique se o broker local (`core-mosquitto`) está ativo.
+- Ajuste `log_level` para `DEBUG` ao testar integrações entre nuvem e tópicos locais.
+
