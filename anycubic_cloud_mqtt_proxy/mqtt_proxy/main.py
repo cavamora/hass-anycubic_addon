@@ -133,6 +133,12 @@ class ProxyService:
                     "machine_type": p.machine_type,
                     "key": p.key,
                 }
+                # Assina tópicos de status MQTT para esta impressora
+                try:
+                    if self.api is not None:
+                        self.api.mqtt_add_subscribed_printer(p)
+                except Exception as e:
+                    LOG.error("Falha ao registrar assinatura MQTT da impressora %s: %s", p.key, e)
                 # Loga informações detalhadas da impressora, quando disponíveis
                 try:
                     fw_ver = p.fw_version.firmware_version if getattr(p, "fw_version", None) else None
