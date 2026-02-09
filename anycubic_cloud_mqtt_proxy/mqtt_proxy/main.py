@@ -62,6 +62,19 @@ class ProxyService:
         # Printer map por key
         self.printers_by_key: dict[str, dict[str, Any]] = {}
 
+    def _on_local_connect(self, client: mqtt_client.Client, userdata: Any, flags: dict[str, Any], rc: int) -> None:
+        if rc == 0:
+            LOG.info("Conectado ao MQTT local com sucesso.")
+            # Subscrever tópicos somente após conexão bem-sucedida
+            for sub in self.local_subs:
+                LOG.info("Subscribing local: %s", sub)
+                client.subscribe(sub)
+        else:
+            LOG.error("Falha ao conectar ao MQTT local. rc=%s", rc)
+
+    def _on_local_disconnect(self, client: mqtt_client.Client, userdata: Any, rc: int) -> None:
+        LOG.warning("Desconectado do MQTT local. rc=%s", rc)
+
     def _auth_mode(self) -> AnycubicAuthMode:
         # Força modo SLICER para usar apenas access_token do Anycubic Slicer
         return AnycubicAuthMode.SLICER
@@ -157,11 +170,12 @@ class ProxyService:
         if cfg.get("username"):
             cli.username_pw_set(cfg.get("username"), cfg.get("password") or None)
         cli.on_message = self._on_local_message
-        cli.connect(cfg.get("host", "core-mosquitto"), int(cfg.get("port", 1883)), keepalive=60)
-        # Subscrever tópicos locais para repasse
-        for sub in self.local_subs:
-            LOG.info("Subscribing local: %s", sub)
-            cli.subscribe(sub)
+        cli.on_connect = self._on_local_connect
+        cli.on_disconnect = self._on_local_disconnect
+        host = cfg.get("host", "core-mosquitto")
+        port = int(cfg.get("port", 1883))
+        LOG.info("Conectando ao MQTT local em %s:%s", host, port)
+        cli.connect(host, port, keepalive=60)
         cli.loop_start()
         self.local_client = cli
 
