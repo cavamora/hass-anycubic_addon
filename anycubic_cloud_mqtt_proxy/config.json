@@ -1,6 +1,6 @@
 {
   "name": "Anycubic Cloud MQTT Proxy",
-  "version": "0.2.2",
+  "version": "0.2.4",
   "slug": "anycubic_cloud_mqtt_proxy",
   "description": "Proxy entre o MQTT da nuvem Anycubic e o MQTT local do Home Assistant.",
   "arch": ["aarch64", "amd64", "armv7"],
@@ -23,7 +23,7 @@
       "anycubic_cloud_proxy/to_cloud/raw",
       "anycubic_cloud_proxy/to_cloud/publish/#"
     ],
-    "ssl_cert_dir": "/data/ssl/anycubic"
+    "ssl_cert_dir": "/ssl/anycubic"
   },
   "schema": {
     "access_token": "str",

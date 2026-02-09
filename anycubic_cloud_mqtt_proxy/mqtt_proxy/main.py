@@ -40,22 +40,24 @@ class ProxyService:
         self.local_prefix: str = self.local_cfg.get("base_topic", "anycubic_cloud_proxy")
         self.allow_prefix: str = opts.get("allow_publish_prefix", "anycubic/anycubicCloud/v1/printer/public/")
         self.local_subs: list[str] = opts.get("subscribe_local_topics", [f"{self.local_prefix}/to_cloud/raw", f"{self.local_prefix}/to_cloud/publish/#"])  # noqa: E501
-        self.ssl_cert_dir: str = opts.get("ssl_cert_dir", "/data/ssl/anycubic")
+        self.ssl_cert_dir: str = opts.get("ssl_cert_dir", "/ssl/anycubic")
+        # Fallback automático: se diretório configurado não existir, tenta /ssl/anycubic
+        try:
+            if not os.path.exists(self.ssl_cert_dir) and os.path.exists("/ssl/anycubic"):
+                LOG.info("Diretório de certificados não encontrado em %s; usando /ssl/anycubic.", self.ssl_cert_dir)
+                self.ssl_cert_dir = "/ssl/anycubic"
+        except Exception:
+            pass
 
         self._stop_event = threading.Event()
 
         # MQTT local
         self.local_client: mqtt_client.Client | None = None
 
-        # Anycubic MQTT + API
-        self.session = aiohttp.ClientSession()
-        self.cookies = aiohttp.CookieJar()
-        self.api = AnycubicMQTTAPI(
-            session=self.session,
-            cookie_jar=self.cookies,
-            debug_logger=LOG,
-            auth_mode=self._auth_mode(),
-        )
+        # Anycubic MQTT + API (inicializados em async_setup)
+        self.session: aiohttp.ClientSession | None = None
+        self.cookies: aiohttp.CookieJar | None = None
+        self.api: AnycubicMQTTAPI | None = None
 
         # Printer map por key
         self.printers_by_key: dict[str, dict[str, Any]] = {}
@@ -71,6 +73,16 @@ class ProxyService:
         """Configura autenticação e valida tokens."""
         auth_mode = self._auth_mode()
         access_token = self.opts.get("access_token") or None
+
+        # Criar sessão e API dentro de função assíncrona
+        self.session = aiohttp.ClientSession()
+        self.cookies = aiohttp.CookieJar()
+        self.api = AnycubicMQTTAPI(
+            session=self.session,
+            cookie_jar=self.cookies,
+            debug_logger=LOG,
+            auth_mode=auth_mode,
+        )
 
         self.api.set_authentication(
             auth_token=None,
@@ -89,6 +101,8 @@ class ProxyService:
 
     async def load_printers(self) -> None:
         """Carrega impressoras do usuário para montar o mapeamento."""
+        if not self.api:
+            raise RuntimeError("API não inicializada")
         printers = await self.api.list_my_printers(ignore_init_errors=True)
         LOG.info("Encontradas %d impressoras.", len(printers))
         self.printers_by_key.clear()
@@ -117,9 +131,11 @@ class ProxyService:
         def runner():
             try:
                 # Callback para espelho de mensagens
-                self.api._mqtt_callback_mirror_raw_message = self._mirror_raw_to_local
+                if self.api is not None:
+                    self.api._mqtt_callback_mirror_raw_message = self._mirror_raw_to_local
                 # Conecta e bloqueia até encerrar
-                self.api.connect_mqtt()
+                if self.api is not None:
+                    self.api.connect_mqtt()
             except Exception as e:
                 LOG.error("Erro no cliente MQTT Anycubic: %s", e)
         th = threading.Thread(target=runner, daemon=True)
@@ -225,13 +241,8 @@ class ProxyService:
 
         # Inicializa loop assíncrono para auth + printers
         import asyncio
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            loop.run_until_complete(self.setup_auth())
-            loop.run_until_complete(self.load_printers())
-        finally:
-            loop.close()
+        asyncio.run(self.setup_auth())
+        asyncio.run(self.load_printers())
 
         # Prepara MQTT local e nuvem
         self._ensure_local_client()
@@ -251,6 +262,9 @@ class ProxyService:
             if self.local_client:
                 self.local_client.loop_stop()
                 self.local_client.disconnect()
+            if self.session:
+                import asyncio
+                asyncio.run(self.session.close())
         except Exception:
             pass
 

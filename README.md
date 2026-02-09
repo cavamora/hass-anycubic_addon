@@ -19,7 +19,8 @@ Este add-on funciona como um proxy entre o MQTT da nuvem da Anycubic e o MQTT lo
    - `ssl_cert_dir`: caminho onde você colocará os certificados TLS da Anycubic (ver abaixo).
 
 4. Certificados TLS Anycubic (necessários para o MQTT da nuvem):
-   - Coloque os arquivos `anycubic_mqqt_tls_ca.crt`, `anycubic_mqqt_tls_client.crt`, `anycubic_mqqt_tls_client.key` em `/data/ssl/anycubic` do add-on (ou ajuste `ssl_cert_dir`).
+   - Coloque os arquivos `anycubic_mqqt_tls_ca.crt`, `anycubic_mqqt_tls_client.crt`, `anycubic_mqqt_tls_client.key` em `/ssl/anycubic` (padrão) do Home Assistant.
+   - Você pode ajustar `ssl_cert_dir` nas opções se quiser outro caminho; o add-on tenta fallback automático para `/ssl/anycubic` se o diretório configurado não existir.
 
 ## Tópicos e fluxo
 
