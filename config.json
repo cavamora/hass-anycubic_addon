@@ -45,5 +45,5 @@
     "subscribe_local_topics": ["str"],
     "ssl_cert_dir": "str"
   },
-  "image": "local/anycubic_cloud_mqtt_proxy"
+  
 }

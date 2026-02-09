@@ -87,3 +87,10 @@ Se preferir sem publicar em GitHub:
 - Verifique se o broker local (`core-mosquitto`) está ativo.
 - Ajuste `log_level` para `DEBUG` ao testar integrações entre nuvem e tópicos locais.
 
+## Segurança e privacidade
+
+- Este repositório não contém tokens pessoais; `auth_token`, `access_token` e `device_id` são fornecidos em tempo de execução via opções do add-on e NÃO devem ser commitados.
+- Os certificados TLS (arquivos `.crt`/`.key`) não são inclusos no repositório. Mantenha-os somente dentro do container (pasta `/data/ssl/anycubic`).
+- A biblioteca `anycubic_cloud_api` inclui constantes públicas (ex.: `AC_KNOWN_*`) obtidas do cliente da Anycubic (IDs/versões). Elas não são credenciais do seu usuário, mas se preferir pode parametrizá-las via ambiente.
+- O arquivo `.gitignore` previne o commit de arquivos sensíveis e de sistema.
+
