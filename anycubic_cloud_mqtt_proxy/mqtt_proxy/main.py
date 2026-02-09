@@ -62,9 +62,6 @@ class ProxyService:
         # Printer map por key
         self.printers_by_key: dict[str, dict[str, Any]] = {}
 
-        # Espelho de mensagens cruas da nuvem → local
-        self.api.set_mqtt_log_all_messages(False)
-
     def _auth_mode(self) -> AnycubicAuthMode:
         # Força modo SLICER para usar apenas access_token do Anycubic Slicer
         return AnycubicAuthMode.SLICER
@@ -83,6 +80,8 @@ class ProxyService:
             debug_logger=LOG,
             auth_mode=auth_mode,
         )
+        # Desativar espelho de todas as mensagens por padrão
+        self.api.set_mqtt_log_all_messages(False)
 
         self.api.set_authentication(
             auth_token=None,
