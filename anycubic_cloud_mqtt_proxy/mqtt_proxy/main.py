@@ -64,20 +64,18 @@ class ProxyService:
         self.api.set_mqtt_log_all_messages(False)
 
     def _auth_mode(self) -> AnycubicAuthMode:
-        mode = str(self.opts.get("auth_mode", "android")).lower()
-        return AnycubicAuthMode.ANDROID if mode == "android" else AnycubicAuthMode.SLICER
+        # Força modo SLICER para usar apenas access_token do Anycubic Slicer
+        return AnycubicAuthMode.SLICER
 
     async def setup_auth(self) -> None:
         """Configura autenticação e valida tokens."""
         auth_mode = self._auth_mode()
-        auth_token = self.opts.get("auth_token") or ""
         access_token = self.opts.get("access_token") or None
-        device_id = self.opts.get("device_id") or None
 
         self.api.set_authentication(
-            auth_token=auth_token if auth_token else None,
+            auth_token=None,
             auth_mode=auth_mode,
-            device_id=device_id,
+            device_id=None,
             auth_access_token=access_token,
             auto_pick_token=True,
         )
@@ -85,7 +83,7 @@ class ProxyService:
         # Valida e obtém user info
         ok = await self.api.check_api_tokens()
         if not ok:
-            raise RuntimeError("Falha de autenticação na API Anycubic. Verifique tokens.")
+            raise RuntimeError("Falha de autenticação na API Anycubic. Informe um access_token válido do Anycubic Slicer.")
         await self.api.get_user_info()
         LOG.info("Autenticado na Anycubic Cloud como %s", self.api.anycubic_auth.api_user_identifier)
 

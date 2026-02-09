@@ -13,10 +13,7 @@ Este add-on funciona como um proxy entre o MQTT da nuvem da Anycubic e o MQTT lo
 1. Copie a pasta `addons/anycubic_cloud_mqtt_proxy` para o diretório de add-ons locais do seu Home Assistant.
 2. No Supervisor, adicione o repositório local (se aplicável) e instale o add-on.
 3. Configure as opções:
-   - `auth_mode`: `android` ou `slicer`.
-   - `auth_token`: token de usuário (Android) ou deixe vazio se usar `access_token` no modo `slicer`.
-   - `access_token`: token de acesso (modo slicer), se preferir.
-   - `device_id`: opcional (Android). Se vazio, o app gera um automaticamente.
+   - `access_token`: token de acesso do Anycubic Slicer (Windows).
    - `local_mqtt.host`: normalmente `core-mosquitto`.
    - `local_mqtt.base_topic`: prefixo local para mensagens espelhadas, padrão `anycubic_cloud_proxy`.
    - `ssl_cert_dir`: caminho onde você colocará os certificados TLS da Anycubic (ver abaixo).
