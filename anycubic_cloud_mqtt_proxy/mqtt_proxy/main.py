@@ -115,6 +115,17 @@ class ProxyService:
                 }
         LOG.debug("Mapa de impressoras: %s", self.printers_by_key)
 
+    async def _async_bootstrap(self) -> None:
+        """Inicializa autenticação e carrega impressoras em um único loop."""
+        await self.setup_auth()
+        await self.load_printers()
+        # Fecha a sessão HTTP para evitar warnings de sessão não fechada
+        try:
+            if self.session:
+                await self.session.close()
+        except Exception:
+            pass
+
     def _mirror_raw_to_local(self, topic: str, payload: str) -> None:
         """Publica mensagem crua recebida da nuvem no broker local."""
         if not self.local_client:
@@ -240,8 +251,7 @@ class ProxyService:
 
         # Inicializa loop assíncrono para auth + printers
         import asyncio
-        asyncio.run(self.setup_auth())
-        asyncio.run(self.load_printers())
+        asyncio.run(self._async_bootstrap())
 
         # Prepara MQTT local e nuvem
         self._ensure_local_client()
