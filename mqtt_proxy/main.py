@@ -1,0 +1,273 @@
+import json
+import logging
+import os
+import signal
+import sys
+import threading
+import time
+from typing import Any
+
+import aiohttp
+from paho.mqtt import client as mqtt_client
+
+# Ajusta caminho para importar a lib reutilizada
+sys.path.append("/opt")
+from anycubic_cloud_api.anycubic_api import AnycubicMQTTAPI, AnycubicAPI  # type: ignore
+from anycubic_cloud_api.models.auth import AnycubicAuthMode  # type: ignore
+
+
+LOG = logging.getLogger("anycubic_proxy")
+
+
+def load_options() -> dict[str, Any]:
+    """Carrega opções do add-on do arquivo padrão do Supervisor."""
+    options_path = "/data/options.json"
+    try:
+        with open(options_path, "r") as f:
+            return json.load(f)
+    except Exception as e:
+        LOG.error("Falha ao ler %s: %s", options_path, e)
+        return {}
+
+
+class ProxyService:
+    def __init__(self, opts: dict[str, Any]) -> None:
+        self.opts = opts
+        log_level = opts.get("log_level", "INFO").upper()
+        logging.basicConfig(level=getattr(logging, log_level, logging.INFO), format="%(asctime)s %(levelname)s %(message)s")
+
+        self.local_cfg = opts.get("local_mqtt", {})
+        self.local_prefix: str = self.local_cfg.get("base_topic", "anycubic_cloud_proxy")
+        self.allow_prefix: str = opts.get("allow_publish_prefix", "anycubic/anycubicCloud/v1/printer/public/")
+        self.local_subs: list[str] = opts.get("subscribe_local_topics", [f"{self.local_prefix}/to_cloud/raw", f"{self.local_prefix}/to_cloud/publish/#"])  # noqa: E501
+        self.ssl_cert_dir: str = opts.get("ssl_cert_dir", "/data/ssl/anycubic")
+
+        self._stop_event = threading.Event()
+
+        # MQTT local
+        self.local_client: mqtt_client.Client | None = None
+
+        # Anycubic MQTT + API
+        self.session = aiohttp.ClientSession()
+        self.cookies = aiohttp.CookieJar()
+        self.api = AnycubicMQTTAPI(
+            session=self.session,
+            cookie_jar=self.cookies,
+            debug_logger=LOG,
+            auth_mode=self._auth_mode(),
+        )
+
+        # Printer map por key
+        self.printers_by_key: dict[str, dict[str, Any]] = {}
+
+        # Espelho de mensagens cruas da nuvem → local
+        self.api.set_mqtt_log_all_messages(False)
+
+    def _auth_mode(self) -> AnycubicAuthMode:
+        mode = str(self.opts.get("auth_mode", "android")).lower()
+        return AnycubicAuthMode.ANDROID if mode == "android" else AnycubicAuthMode.SLICER
+
+    async def setup_auth(self) -> None:
+        """Configura autenticação e valida tokens."""
+        auth_mode = self._auth_mode()
+        auth_token = self.opts.get("auth_token") or ""
+        access_token = self.opts.get("access_token") or None
+        device_id = self.opts.get("device_id") or None
+
+        self.api.set_authentication(
+            auth_token=auth_token if auth_token else None,
+            auth_mode=auth_mode,
+            device_id=device_id,
+            auth_access_token=access_token,
+            auto_pick_token=True,
+        )
+
+        # Valida e obtém user info
+        ok = await self.api.check_api_tokens()
+        if not ok:
+            raise RuntimeError("Falha de autenticação na API Anycubic. Verifique tokens.")
+        await self.api.get_user_info()
+        LOG.info("Autenticado na Anycubic Cloud como %s", self.api.anycubic_auth.api_user_identifier)
+
+    async def load_printers(self) -> None:
+        """Carrega impressoras do usuário para montar o mapeamento."""
+        printers = await self.api.list_my_printers(ignore_init_errors=True)
+        LOG.info("Encontradas %d impressoras.", len(printers))
+        self.printers_by_key.clear()
+        for p in printers:
+            if p and p.key:
+                self.printers_by_key[p.key] = {
+                    "id": p.id,
+                    "name": p.name,
+                    "machine_type": p.machine_type,
+                    "key": p.key,
+                }
+        LOG.debug("Mapa de impressoras: %s", self.printers_by_key)
+
+    def _mirror_raw_to_local(self, topic: str, payload: str) -> None:
+        """Publica mensagem crua recebida da nuvem no broker local."""
+        if not self.local_client:
+            return
+        local_topic = f"{self.local_prefix}/cloud/{topic}"
+        try:
+            self.local_client.publish(local_topic, payload, qos=0, retain=False)
+        except Exception as e:
+            LOG.error("Falha ao publicar no MQTT local (%s): %s", local_topic, e)
+
+    def _start_anycubic_mqtt(self) -> None:
+        """Conecta ao MQTT Anycubic em uma thread dedicada."""
+        def runner():
+            try:
+                # Callback para espelho de mensagens
+                self.api._mqtt_callback_mirror_raw_message = self._mirror_raw_to_local
+                # Conecta e bloqueia até encerrar
+                self.api.connect_mqtt()
+            except Exception as e:
+                LOG.error("Erro no cliente MQTT Anycubic: %s", e)
+        th = threading.Thread(target=runner, daemon=True)
+        th.start()
+
+    def _ensure_local_client(self) -> None:
+        cfg = self.local_cfg
+        cli = mqtt_client.Client(client_id=f"anycubic_proxy_{int(time.time())}")
+        if cfg.get("username"):
+            cli.username_pw_set(cfg.get("username"), cfg.get("password") or None)
+        cli.on_message = self._on_local_message
+        cli.connect(cfg.get("host", "core-mosquitto"), int(cfg.get("port", 1883)), keepalive=60)
+        # Subscrever tópicos locais para repasse
+        for sub in self.local_subs:
+            LOG.info("Subscribing local: %s", sub)
+            cli.subscribe(sub)
+        cli.loop_start()
+        self.local_client = cli
+
+    def _on_local_message(self, client: mqtt_client.Client, userdata: Any, message: mqtt_client.MQTTMessage) -> None:
+        topic = str(message.topic)
+        raw = message.payload.decode("utf-8")
+        try:
+            if topic.endswith("/raw"):
+                # Espera JSON {"topic": "<cloud_topic>", "payload": <obj|string>}
+                data = json.loads(raw)
+                cloud_topic = str(data.get("topic") or "")
+                payload = data.get("payload")
+                if not cloud_topic.startswith(self.allow_prefix):
+                    LOG.warning("Negado repasse: tópico fora do prefixo permitido: %s", cloud_topic)
+                    return
+                mqtt_payload = json.dumps(payload) if isinstance(payload, dict) else str(payload)
+                if self.api._mqtt_client is not None:
+                    LOG.info("Repasse local→nuvem (raw): %s", cloud_topic)
+                    self.api._mqtt_client.publish(cloud_topic, mqtt_payload)
+                else:
+                    LOG.error("Cliente MQTT da nuvem não conectado, não foi possível repassar.")
+
+            elif "/to_cloud/publish/" in topic:
+                # Formato: base/to_cloud/publish/{printer_key}/{endpoint}
+                parts = topic.split("/")
+                try:
+                    idx = parts.index("publish")
+                    printer_key = parts[idx + 1]
+                    endpoint = "/".join(parts[idx + 2:])
+                except Exception:
+                    LOG.error("Tópico local inválido para publish: %s", topic)
+                    return
+                if printer_key not in self.printers_by_key:
+                    LOG.error("Printer key desconhecida: %s", printer_key)
+                    return
+                try:
+                    payload_obj = json.loads(raw)
+                except Exception:
+                    payload_obj = raw
+                # Constrói tópico de publicação para a impressora
+                printer_info = self.printers_by_key[printer_key]
+                full_topic = f"anycubic/anycubicCloud/v1/printer/public/{printer_info['machine_type']}/{printer_info['key']}/{endpoint}"
+                if not full_topic.startswith(self.allow_prefix):
+                    LOG.warning("Negado repasse: endpoint fora do prefixo permitido: %s", full_topic)
+                    return
+                mqtt_payload = json.dumps(payload_obj) if isinstance(payload_obj, dict) else str(payload_obj)
+                if self.api._mqtt_client is not None:
+                    LOG.info("Repasse local→nuvem (publish): %s", full_topic)
+                    self.api._mqtt_client.publish(full_topic, mqtt_payload)
+                else:
+                    LOG.error("Cliente MQTT da nuvem não conectado, não foi possível repassar.")
+
+            else:
+                LOG.debug("Ignorando tópico local não tratado: %s", topic)
+
+        except Exception as e:
+            LOG.error("Erro processando mensagem local (%s): %s", topic, e)
+
+    def run(self) -> None:
+        # Verifica e prepara certificados (linka para o local esperado pela lib)
+        ca = os.path.join(self.ssl_cert_dir, "anycubic_mqqt_tls_ca.crt")
+        crt = os.path.join(self.ssl_cert_dir, "anycubic_mqqt_tls_client.crt")
+        key = os.path.join(self.ssl_cert_dir, "anycubic_mqqt_tls_client.key")
+        lib_res_dir = "/opt/anycubic_cloud_api/resources"
+        try:
+            os.makedirs(lib_res_dir, exist_ok=True)
+            def _ensure_link(src: str, dst_name: str) -> None:
+                dst = os.path.join(lib_res_dir, dst_name)
+                if os.path.exists(dst):
+                    return
+                if os.path.exists(src):
+                    try:
+                        os.symlink(src, dst)
+                        LOG.info("Vinculado certificado: %s -> %s", src, dst)
+                    except Exception as e:
+                        LOG.warning("Falha ao criar symlink de certificado (%s → %s): %s", src, dst, e)
+            _ensure_link(ca, "anycubic_mqqt_tls_ca.crt")
+            _ensure_link(crt, "anycubic_mqqt_tls_client.crt")
+            _ensure_link(key, "anycubic_mqqt_tls_client.key")
+        except Exception as e:
+            LOG.warning("Falha ao preparar diretório de certificados: %s", e)
+        if not (os.path.exists(ca) and os.path.exists(crt) and os.path.exists(key)):
+            LOG.warning(
+                "Certificados TLS Anycubic não encontrados em %s. O cliente MQTT da nuvem pode falhar ao conectar.",
+                self.ssl_cert_dir,
+            )
+
+        # Inicializa loop assíncrono para auth + printers
+        import asyncio
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(self.setup_auth())
+            loop.run_until_complete(self.load_printers())
+        finally:
+            loop.close()
+
+        # Prepara MQTT local e nuvem
+        self._ensure_local_client()
+        self._start_anycubic_mqtt()
+
+        LOG.info("Proxy iniciado. Escutando nuvem e tópicos locais para repasse.")
+
+        # Aguarda sinal de parada
+        try:
+            while not self._stop_event.is_set():
+                time.sleep(1)
+        except KeyboardInterrupt:
+            pass
+
+        LOG.info("Encerrando...")
+        try:
+            if self.local_client:
+                self.local_client.loop_stop()
+                self.local_client.disconnect()
+        except Exception:
+            pass
+
+
+def _signal_handler(service: ProxyService, *args):
+    service._stop_event.set()
+
+
+def main() -> None:
+    opts = load_options()
+    service = ProxyService(opts)
+    signal.signal(signal.SIGTERM, lambda *_: _signal_handler(service))
+    signal.signal(signal.SIGINT, lambda *_: _signal_handler(service))
+    service.run()
+
+
+if __name__ == "__main__":
+    main()

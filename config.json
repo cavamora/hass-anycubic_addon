@@ -1,0 +1,49 @@
+{
+  "name": "Anycubic Cloud MQTT Proxy",
+  "version": "0.1.0",
+  "slug": "anycubic_cloud_mqtt_proxy",
+  "description": "Proxy entre o MQTT da nuvem Anycubic e o MQTT local do Home Assistant.",
+  "arch": ["aarch64", "amd64", "armv7"],
+  "startup": "services",
+  "boot": "auto",
+  "init": false,
+  "map": ["config:rw", "ssl:rw"],
+  "options": {
+    "auth_mode": "android",
+    "auth_token": "",
+    "access_token": "",
+    "device_id": "",
+    "log_level": "INFO",
+    "local_mqtt": {
+      "host": "core-mosquitto",
+      "port": 1883,
+      "username": "",
+      "password": "",
+      "base_topic": "anycubic_cloud_proxy"
+    },
+    "allow_publish_prefix": "anycubic/anycubicCloud/v1/printer/public/",
+    "subscribe_local_topics": [
+      "anycubic_cloud_proxy/to_cloud/raw",
+      "anycubic_cloud_proxy/to_cloud/publish/#"
+    ],
+    "ssl_cert_dir": "/data/ssl/anycubic"
+  },
+  "schema": {
+    "auth_mode": "list(android|slicer)",
+    "auth_token": "str",
+    "access_token": "str",
+    "device_id": "str",
+    "log_level": "list(DEBUG|INFO|WARNING|ERROR)",
+    "local_mqtt": {
+      "host": "str",
+      "port": "int",
+      "username": "str",
+      "password": "str",
+      "base_topic": "str"
+    },
+    "allow_publish_prefix": "str",
+    "subscribe_local_topics": ["str"],
+    "ssl_cert_dir": "str"
+  },
+  "image": "local/anycubic_cloud_mqtt_proxy"
+}

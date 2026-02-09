@@ -1,0 +1,4 @@
+aiohttp==3.9.5
+paho-mqtt==1.6.1
+bcrypt==4.1.2
+cryptography==42.0.5
