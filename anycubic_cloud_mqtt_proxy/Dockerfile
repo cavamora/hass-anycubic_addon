@@ -20,7 +20,8 @@ COPY mqtt_proxy/ /opt/mqtt_proxy/
 COPY mqtt_proxy/anycubic_cloud_api /opt/anycubic_cloud_api
 
 # Dependências Python (instalar no venv)
-RUN pip3 install --no-cache-dir -r /opt/mqtt_proxy/requirements.txt
+RUN /opt/venv/bin/pip install --upgrade pip setuptools wheel \
+	&& /opt/venv/bin/pip install --no-cache-dir -r /opt/mqtt_proxy/requirements.txt
 
 # Scripts s6 para iniciar serviço
 COPY rootfs/ /
