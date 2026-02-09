@@ -26,3 +26,6 @@ RUN /opt/venv/bin/pip install --upgrade pip setuptools wheel \
 # Scripts s6 para iniciar serviço
 COPY rootfs/ /
 
+# Garantir permissão de execução do script s6
+RUN chmod +x /etc/services.d/mqtt-proxy/run
+
