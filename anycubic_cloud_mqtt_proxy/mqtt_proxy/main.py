@@ -133,6 +133,27 @@ class ProxyService:
                     "machine_type": p.machine_type,
                     "key": p.key,
                 }
+                # Loga informações detalhadas da impressora, quando disponíveis
+                try:
+                    fw_ver = p.fw_version.firmware_version if getattr(p, "fw_version", None) else None
+                    fw_update_avail = p.fw_version.update_available if getattr(p, "fw_version", None) else False
+                    LOG.info(
+                        "Impressora carregada: id=%s key=%s modelo=%s nome=%s online=%s status=%s fw=%s upd_disp=%s mac=%s material=%s prints=%s tempo_total=%s",
+                        p.id,
+                        p.key,
+                        getattr(p, "model", None),
+                        p.name,
+                        getattr(p, "printer_online", False),
+                        getattr(p, "current_status", "unknown"),
+                        fw_ver,
+                        fw_update_avail,
+                        getattr(p, "machine_mac", None),
+                        getattr(p, "material_type", None),
+                        getattr(p, "print_count", None),
+                        getattr(p, "total_print_time_dhm_str", None),
+                    )
+                except Exception as e:
+                    LOG.debug("Falha ao logar detalhes da impressora %s: %s", p.key, e)
         LOG.debug("Mapa de impressoras: %s", self.printers_by_key)
 
     async def _async_bootstrap(self) -> None:
