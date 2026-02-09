@@ -110,6 +110,15 @@ class AnycubicAPIBase:
         if self._debug_logger:
             self._debug_logger.error(msg)
 
+    def _log_to_info(self, msg: str) -> None:
+        if self._debug_logger:
+            # Usa nível INFO para destacar eventos importantes (subs, msgs recebidas)
+            try:
+                self._debug_logger.info(msg)
+            except Exception:
+                # Fallback para debug se logger não suportar INFO
+                self._debug_logger.debug(msg)
+
     #
     #
     # API Functions

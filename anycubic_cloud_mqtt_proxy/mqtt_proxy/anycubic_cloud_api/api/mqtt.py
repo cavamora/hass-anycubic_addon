@@ -277,6 +277,19 @@ class AnycubicMQTTAPI(AnycubicAPIFunctions):
                 except Exception:
                     # Ignore mirror errors to not disrupt core processing
                     pass
+            # Log chegada de mensagem na nuvem (tópico + campos principais)
+            try:
+                topic_preview = str(message.topic)
+                payload_json = json.loads(message.payload.decode("utf-8"))
+                msg_type = payload_json.get("type")
+                msg_action = payload_json.get("action")
+                msg_state = payload_json.get("state")
+                self._log_to_info(
+                    f"Anycubic MQTT mensagem recebida: topic={topic_preview} type={msg_type} action={msg_action} state={msg_state}"
+                )
+            except Exception:
+                # Se falhar parse, ainda encaminha para o roteador
+                pass
 
             self._mqtt_message_router(message)
         except Exception as e:
@@ -310,19 +323,19 @@ class AnycubicMQTTAPI(AnycubicAPIFunctions):
             if self._mqtt_connected is None:
                 self._mqtt_connected = asyncio.Event()
 
-            self._log_to_debug("Anycubic MQTT Connected.")
+            self._log_to_info("Anycubic MQTT conectado à nuvem.")
 
             if not self._mqtt_client:
                 raise AnycubicMQTTClientError(ErrorsMQTTClient.connect_client_missing)
 
             for sub in self._build_mqtt_user_subscription():
-                self._log_to_debug(f"Anycubic MQTT Subscribing to USER {sub}.")
+                self._log_to_info(f"Anycubic MQTT assinando tópico de USUÁRIO: {sub}")
                 self._mqtt_client.subscribe(sub)
 
             for printer_id, printer in self._mqtt_subscribed_printers.items():
                 self._mqtt_subscribe_printer_status(printer)
 
-            self._log_to_debug("Anycubic MQTT Subscribed.")
+            self._log_to_info("Anycubic MQTT assinaturas concluídas.")
 
             if (self._mqtt_callback_subscribed):
                 self._mqtt_callback_subscribed()
@@ -388,7 +401,7 @@ class AnycubicMQTTAPI(AnycubicAPIFunctions):
         if not self._mqtt_client:
             raise AnycubicMQTTClientError(ErrorsMQTTClient.sub_printer_status_client_missing)
         for sub in self._build_mqtt_printer_subscription(printer):
-            self._log_to_debug(f"Anycubic MQTT Subscribing to PRINTER {sub}.")
+            self._log_to_info(f"Anycubic MQTT assinando tópico de IMPRESSORA: {sub}")
             self._mqtt_client.subscribe(sub)
 
     def mqtt_add_subscribed_printer(self, printer: AnycubicPrinter) -> None:
