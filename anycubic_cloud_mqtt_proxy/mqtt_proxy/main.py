@@ -37,6 +37,13 @@ class ProxyService:
         logging.basicConfig(level=getattr(logging, log_level, logging.INFO), format="%(asctime)s %(levelname)s %(message)s")
 
         self.local_cfg = opts.get("local_mqtt", {})
+        # Aliases top-level para facilitar configuração do usuário
+        alias_user = opts.get("local_mqtt_username")
+        alias_pass = opts.get("local_mqtt_password")
+        if alias_user:
+            self.local_cfg["username"] = alias_user
+        if alias_pass:
+            self.local_cfg["password"] = alias_pass
         self.local_prefix: str = self.local_cfg.get("base_topic", "anycubic_cloud_proxy")
         self.allow_prefix: str = opts.get("allow_publish_prefix", "anycubic/anycubicCloud/v1/printer/public/")
         self.local_subs: list[str] = opts.get("subscribe_local_topics", [f"{self.local_prefix}/to_cloud/raw", f"{self.local_prefix}/to_cloud/publish/#"])  # noqa: E501
@@ -168,6 +175,7 @@ class ProxyService:
         cfg = self.local_cfg
         cli = mqtt_client.Client(client_id=f"anycubic_proxy_{int(time.time())}")
         if cfg.get("username"):
+            LOG.info("Usando usuário para MQTT local: %s", cfg.get("username"))
             cli.username_pw_set(cfg.get("username"), cfg.get("password") or None)
         cli.on_message = self._on_local_message
         cli.on_connect = self._on_local_connect
