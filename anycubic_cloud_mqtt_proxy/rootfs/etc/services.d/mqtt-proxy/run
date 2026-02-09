@@ -2,4 +2,4 @@
 # s6 service: inicia o proxy Python e mantém em foreground
 
 echo "[s6] Iniciando Anycubic Cloud MQTT Proxy"
-exec python3 /opt/mqtt_proxy/main.py
+exec /opt/venv/bin/python /opt/mqtt_proxy/main.py
