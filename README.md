@@ -94,3 +94,13 @@ Se preferir sem publicar em GitHub:
 - A biblioteca `anycubic_cloud_api` inclui constantes públicas (ex.: `AC_KNOWN_*`) obtidas do cliente da Anycubic (IDs/versões). Elas não são credenciais do seu usuário, mas se preferir pode parametrizá-las via ambiente.
 - O arquivo `.gitignore` previne o commit de arquivos sensíveis e de sistema.
 
+## Troubleshooting (Add-on não aparece na Loja)
+
+- **Repositório público**: confirme que o GitHub está público e acessível.
+- **Estrutura correta**: o add-on deve estar em uma subpasta (ex.: `anycubic_cloud_mqtt_proxy/`) contendo `config.json`, `Dockerfile`, `rootfs/` e `mqtt_proxy/`. Evite arquivos duplicados na raiz.
+- **Sem `image` em `config.json`**: remova o campo `image` para o Supervisor construir localmente com o `Dockerfile`.
+- **`build.json` presente**: adicione `build.json` na subpasta do add-on com `build_from` para as arquiteturas suportadas.
+- **Atualizar repositórios**: Loja de Add-ons → menu (⋮) → Repositórios → Atualizar; se não listar, remova e adicione novamente a URL.
+- **Logs do Supervisor**: verifique se há mensagens de erro de validação do add-on (campos inválidos, JSON malformado, etc.).
+- **Slug e pasta**: manter o `slug` em `config.json` alinhado ao nome da pasta ajuda na identificação.
+

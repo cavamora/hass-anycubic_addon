@@ -44,6 +44,5 @@
     "allow_publish_prefix": "str",
     "subscribe_local_topics": ["str"],
     "ssl_cert_dir": "str"
-  },
-  
+  }
 }
