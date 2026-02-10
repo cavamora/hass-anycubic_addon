@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 from typing import Any
 
 from paho.mqtt import client as mqtt_client
@@ -13,12 +14,34 @@ class HADiscoveryPublisher:
         logger: logging.Logger,
         printers_by_key: dict[str, dict[str, Any]],
         printer_objects_by_key: dict[str, Any],
+        cache_path: str | None = None,
     ) -> None:
         self.local_client = local_client
         self.local_prefix = local_prefix
         self.LOG = logger
         self.printers_by_key = printers_by_key
         self.printer_objects_by_key = printer_objects_by_key
+        self.cache_path = cache_path or "/data/anycubic_proxy_cache.json"
+        self._cache: dict[str, Any] = {}
+
+    # Cache helpers
+    def load_cache(self) -> None:
+        try:
+            if os.path.exists(self.cache_path):
+                with open(self.cache_path, "r") as f:
+                    self._cache = json.load(f)
+                self.LOG.info("Cache de estados carregado: %s", self.cache_path)
+        except Exception as e:
+            self.LOG.warning("Falha ao carregar cache de estados (%s): %s", self.cache_path, e)
+            self._cache = {}
+
+    def save_cache(self) -> None:
+        try:
+            os.makedirs(os.path.dirname(self.cache_path), exist_ok=True)
+            with open(self.cache_path, "w") as f:
+                json.dump(self._cache, f)
+        except Exception as e:
+            self.LOG.warning("Falha ao salvar cache de estados (%s): %s", self.cache_path, e)
 
     def _ha_sensor_config_topic(self, printer_key: str) -> str:
         return f"homeassistant/sensor/anycubic_{printer_key}_status/config"
@@ -184,6 +207,13 @@ class HADiscoveryPublisher:
             self.local_client.publish(self._ha_ace_state_topic(printer_key, box_index), state, qos=0, retain=True)
             if attrs is not None:
                 self.local_client.publish(self._ha_ace_attrs_topic(printer_key, box_index), json.dumps(attrs), qos=0, retain=True)
+            # Atualiza cache
+            self._cache.setdefault(printer_key, {})
+            self._cache[printer_key].setdefault("ace", {})
+            self._cache[printer_key]["ace"][str(box_index)] = {
+                "state": state,
+                "attrs": attrs or {},
+            }
         except Exception as e:
             self.LOG.error("Falha ao publicar Ace Pro %s para %s: %s", box_index + 1, printer_key, e)
 
@@ -213,6 +243,27 @@ class HADiscoveryPublisher:
             # Suporta até duas unidades Ace Pro
             for idx in [0, 1]:
                 self._publish_ace_state_and_attrs(key, idx)
+        # Salva cache após publicar tudo
+        self.save_cache()
+
+    def publish_ace_from_cache(self) -> None:
+        if not self.local_client:
+            return
+        # Publica estados/atributos do cache, se presentes
+        try:
+            for key in self.printers_by_key.keys():
+                ace_cache = (self._cache.get(key) or {}).get("ace") or {}
+                for idx in [0, 1]:
+                    box_key = str(idx)
+                    if box_key in ace_cache:
+                        cached = ace_cache[box_key]
+                        state = cached.get("state", "unknown")
+                        attrs = cached.get("attrs")
+                        self.local_client.publish(self._ha_ace_state_topic(key, idx), state, qos=0, retain=True)
+                        if attrs is not None:
+                            self.local_client.publish(self._ha_ace_attrs_topic(key, idx), json.dumps(attrs), qos=0, retain=True)
+        except Exception as e:
+            self.LOG.warning("Falha ao publicar Ace Pro a partir do cache: %s", e)
 
     def update_from_cloud(self) -> None:
         try:

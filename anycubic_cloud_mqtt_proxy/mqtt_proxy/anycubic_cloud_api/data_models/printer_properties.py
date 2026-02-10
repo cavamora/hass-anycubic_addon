@@ -417,6 +417,7 @@ class AnycubicSpoolInfo:
         "_color",
         "_edit_status",
         "_status",
+        "_consumables_percent",
     )
 
     def __init__(
@@ -427,6 +428,7 @@ class AnycubicSpoolInfo:
         color: list[int],
         edit_status: int,
         status: int,
+        consumables_percent: int | None = None,
     ) -> None:
         self._index = int(index)
         self._sku = str(sku)
@@ -436,11 +438,18 @@ class AnycubicSpoolInfo:
         ])
         self._edit_status = int(edit_status)
         self._status = int(status)
+        self._consumables_percent = int(consumables_percent) if consumables_percent is not None else None
 
     @classmethod
     def from_json(cls, data: dict[str, Any] | None) -> AnycubicSpoolInfo | None:
         if data is None:
             return None
+
+        consumables_percent = (
+            data.get('consumables_percent',
+                data.get('consumable_percent',
+                    data.get('percent')))
+        )
 
         return cls(
             index=data['index'],
@@ -449,6 +458,7 @@ class AnycubicSpoolInfo:
             color=data['color'],
             edit_status=data['edit_status'],
             status=data['status'],
+            consumables_percent=consumables_percent,
         )
 
     @property
@@ -488,8 +498,12 @@ class AnycubicSpoolInfo:
     def __repr__(self) -> str:
         return (
             f"AnycubicSpoolInfo(index={self._index}, sku={self._sku}, material_type={self.material_type}, color={self._color}, "
-            f"edit_status={self._edit_status}, status={self._status})"
+            f"edit_status={self._edit_status}, status={self._status}, consumables_percent={self._consumables_percent})"
         )
+
+    @property
+    def consumables_percent(self) -> int | None:
+        return self._consumables_percent
 
 
 class AnycubicMultiColorBox:
@@ -671,6 +685,7 @@ class AnycubicMultiColorBox:
                 "color": slot.color,
                 "status": slot.status,
                 "spool_loaded": slot.spool_loaded,
+                "consumables_percent": slot.consumables_percent,
             } for slot in self._slots
         ])
         return spool_list

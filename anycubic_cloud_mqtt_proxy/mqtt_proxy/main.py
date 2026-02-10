@@ -105,6 +105,11 @@ class ProxyService:
             debug_logger=LOG,
             auth_mode=auth_mode,
         )
+        # Ao concluir assinaturas do MQTT da nuvem, agendar retries de getInfo
+        try:
+            self.api._mqtt_callback_subscribed = self._on_mqtt_subscribed  # type: ignore[attr-defined]
+        except Exception:
+            pass
         # Desativar espelho de todas as mensagens por padrão
         self.api.set_mqtt_log_all_messages(False)
 
@@ -223,6 +228,35 @@ class ProxyService:
         th = threading.Thread(target=runner, daemon=True)
         th.start()
 
+    def _on_mqtt_subscribed(self) -> None:
+        """Callback após conectar e assinar tópicos na nuvem: agenda retries de getInfo."""
+        try:
+            LOG.info("Nuvem conectada e assinaturas concluídas. Agendando retries de getInfo para Ace Pro.")
+            # Agenda duas tentativas: 8s e 25s
+            self._schedule_ace_getinfo_retry(8)
+            self._schedule_ace_getinfo_retry(25)
+        except Exception as e:
+            LOG.debug("Falha ao agendar retries de getInfo: %s", e)
+
+    def _schedule_ace_getinfo_retry(self, delay_seconds: int) -> None:
+        import asyncio
+        def _runner_for(printer_key: str, pobj: Any) -> None:
+            try:
+                if self.api is None:
+                    return
+                LOG.info("Retry getInfo Ace Pro em %ss para impressora %s", delay_seconds, printer_key)
+                asyncio.run(self.api._send_order_multi_color_box_get_info(pobj))  # type: ignore[attr-defined]
+            except Exception as e:
+                LOG.debug("Falha ao enviar getInfo Ace Pro (retry) para %s: %s", printer_key, e)
+
+        for key, pobj in self.printer_objects_by_key.items():
+            try:
+                t = threading.Timer(delay_seconds, _runner_for, args=(key, pobj))
+                t.daemon = True
+                t.start()
+            except Exception:
+                pass
+
     def _ensure_local_client(self) -> None:
         cfg = self.local_cfg
         cli = mqtt_client.Client(client_id=f"anycubic_proxy_{int(time.time())}")
@@ -336,11 +370,14 @@ class ProxyService:
             logger=LOG,
             printers_by_key=self.printers_by_key,
             printer_objects_by_key=self.printer_objects_by_key,
+            cache_path="/data/anycubic_proxy_cache.json",
         )
+        # Carrega cache persistido e publica estados iniciais a partir dele
+        self.ha.load_cache()
         self.ha.publish_ha_discovery()
         self.ha.publish_all_printer_status()
         self.ha.publish_all_printer_online()
-        self.ha.publish_all_ace()
+        self.ha.publish_ace_from_cache()
         self._start_anycubic_mqtt()
 
         LOG.info("Proxy iniciado. Escutando nuvem e tópicos locais para repasse.")
