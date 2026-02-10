@@ -415,7 +415,7 @@ class HADiscoveryPublisher:
         except Exception as e:
             self.LOG.warning("Falha ao publicar Ace Pro a partir do cache: %s", e)
 
-    def update_from_cloud(self, msg_type: str | None = None, action: str | None = None) -> None:
+    def update_from_cloud(self, msg_type: str | None = None, action: str | None = None, endpoint: str | None = None) -> None:
         try:
             for key, pobj in self.printer_objects_by_key.items():
                 try:
@@ -424,7 +424,9 @@ class HADiscoveryPublisher:
                     pass
             self.publish_all_printer_status()
             self.publish_all_printer_online()
-            self.publish_all_job_sensors()
+            # Atualiza sensores de job somente em mensagens de print/report
+            if msg_type == "print" and (endpoint is None or endpoint == "report"):
+                self.publish_all_job_sensors()
             # Só atualiza Ace quando vier getInfo (dados completos)
             if not (msg_type == "multiColorBox" and action != "getInfo"):
                 self.publish_all_ace()

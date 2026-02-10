@@ -56,7 +56,7 @@ class AnycubicMQTTAPI(AnycubicAPIFunctions):
     def __init__(
         self,
         *args: Any,
-        mqtt_callback_printer_update: Callable[[str | None, str | None, str | None], None] | None = None,
+        mqtt_callback_printer_update: Callable[[str | None, str | None, str | None, str | None], None] | None = None,
         mqtt_callback_printer_busy: Callable[[], None] | None = None,
         mqtt_callback_subscribed: Callable[[], None] | None = None,
         mqtt_callback_mirror_raw_message: Callable[[str, str], None] | None = None,
@@ -67,7 +67,7 @@ class AnycubicMQTTAPI(AnycubicAPIFunctions):
         self._mqtt_log_all_messages: bool = False
         self._mqtt_connected: asyncio.Event | None = None
         self._mqtt_disconnected: asyncio.Event | None = None
-        self._mqtt_callback_printer_update: Callable[[str | None, str | None, str | None], None] | None = mqtt_callback_printer_update
+        self._mqtt_callback_printer_update: Callable[[str | None, str | None, str | None, str | None], None] | None = mqtt_callback_printer_update
         self._mqtt_callback_printer_busy: Callable[[], None] | None = mqtt_callback_printer_busy
         self._mqtt_callback_subscribed: Callable[[], None] | None = mqtt_callback_subscribed
         self._mqtt_callback_mirror_raw_message: Callable[[str, str], None] | None = mqtt_callback_mirror_raw_message
@@ -188,12 +188,18 @@ class AnycubicMQTTAPI(AnycubicAPIFunctions):
             # Extrai tipo/ação para o callback
             msg_type = None
             action = None
+            endpoint = None
             try:
                 msg_type = payload.get('type') if isinstance(payload, dict) else None
                 action = payload.get('action') if isinstance(payload, dict) else None
+                # endpoint é a parte final do tópico (ex.: 'report', 'update')
+                try:
+                    endpoint = get_part_from_mqtt_topic(topic, 8)
+                except Exception:
+                    endpoint = None
                 if self._mqtt_callback_printer_update:
                     # Passa chave da impressora, tipo e ação para o callback
-                    self._mqtt_callback_printer_update(printer_key, msg_type, action)
+                    self._mqtt_callback_printer_update(printer_key, msg_type, action, endpoint)
 
                 if (
                     self._mqtt_callback_printer_busy and
