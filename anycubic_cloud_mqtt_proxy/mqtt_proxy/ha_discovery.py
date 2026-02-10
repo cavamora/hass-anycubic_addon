@@ -154,10 +154,12 @@ class HADiscoveryPublisher:
             try:
                 ds = mcb.drying_status
                 if ds is not None:
-                    attrs["drying_status"] = {
-                        "status": getattr(ds, "status", None),
-                        "target_temp": getattr(ds, "target_temp", None),
-                        "remaining_time": getattr(ds, "remaining_time", None),
+                    attrs["drying"] = {
+                        "on": getattr(ds, "is_drying", False),
+                        "status_code": getattr(ds, "raw_status_code", None),
+                        "target_temperature": getattr(ds, "target_temperature", 0),
+                        "total_duration": getattr(ds, "total_duration", 0),
+                        "remaining_time": getattr(ds, "remaining_time", 0),
                     }
             except Exception:
                 pass
