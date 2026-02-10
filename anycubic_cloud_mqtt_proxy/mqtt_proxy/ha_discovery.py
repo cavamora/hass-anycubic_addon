@@ -1,4 +1,5 @@
 import json
+import time
 import logging
 import os
 from typing import Any
@@ -49,6 +50,9 @@ class HADiscoveryPublisher:
     def _ha_sensor_state_topic(self, printer_key: str) -> str:
         return f"{self.local_prefix}/printers/{printer_key}/status"
 
+    def _ha_sensor_attrs_topic(self, printer_key: str) -> str:
+        return f"{self.local_prefix}/printers/{printer_key}/status/attrs"
+
     def _ha_online_config_topic(self, printer_key: str) -> str:
         return f"homeassistant/binary_sensor/anycubic_{printer_key}_online/config"
 
@@ -84,6 +88,7 @@ class HADiscoveryPublisher:
             "name": f"{name} Status",
             "unique_id": f"anycubic_{key}_status",
             "state_topic": self._ha_sensor_state_topic(key),
+            "json_attributes_topic": self._ha_sensor_attrs_topic(key),
             "icon": "mdi:printer-3d",
             "device": device,
         }
@@ -143,15 +148,69 @@ class HADiscoveryPublisher:
             return
         topic = self._ha_sensor_state_topic(printer_key)
         status = self.printers_by_key.get(printer_key, {}).get("status", "unknown")
+        # Coleta e publica atributos de job
+        attrs_topic = self._ha_sensor_attrs_topic(printer_key)
+        attrs = self._collect_printer_job_attrs(printer_key)
         try:
             self.LOG.info("Atualizando estado da impressora %s: %s", printer_key, status)
             self.local_client.publish(topic, status, qos=0, retain=True)
+            if attrs is not None:
+                self.local_client.publish(attrs_topic, json.dumps(attrs), qos=0, retain=True)
         except Exception as e:
             self.LOG.error("Falha ao publicar estado %s para %s: %s", status, printer_key, e)
 
     def publish_all_printer_status(self) -> None:
         for key in self.printers_by_key.keys():
             self._publish_printer_status(key)
+
+    def _collect_printer_job_attrs(self, printer_key: str) -> dict[str, Any] | None:
+        pobj = self.printer_objects_by_key.get(printer_key)
+        if pobj is None:
+            return None
+        try:
+            progress = getattr(pobj, "latest_project_progress_percentage", None)
+            elapsed_min = getattr(pobj, "latest_project_print_time_elapsed_minutes", None)
+            remaining_min = getattr(pobj, "latest_project_print_time_remaining_minutes", None)
+            total_layers = getattr(pobj, "latest_project_print_total_layers", None)
+            # current layer via project print_current_layer
+            current_layer = None
+            lp = getattr(pobj, "latest_project", None)
+            if lp is not None:
+                try:
+                    current_layer = lp.print_current_layer
+                except Exception:
+                    current_layer = None
+            speed_mode = getattr(pobj, "latest_project_print_speed_mode_string", None)
+            speed_pct = getattr(pobj, "latest_project_print_speed_pct", None)
+            z_thick = getattr(pobj, "latest_project_z_thick", None)
+            status_msg = getattr(pobj, "latest_project_print_status_message", None)
+            image_url = getattr(pobj, "latest_project_image_url", None)
+            project_name = getattr(pobj, "latest_project_name", None)
+
+            eta_ts = None
+            try:
+                if remaining_min is not None:
+                    eta_ts = int(time.time()) + int(remaining_min) * 60
+            except Exception:
+                eta_ts = None
+
+            return {
+                "project_name": project_name,
+                "job_status": status_msg,
+                "progress_pct": progress,
+                "current_layer": current_layer,
+                "total_layers": total_layers,
+                "elapsed_min": elapsed_min,
+                "remaining_min": remaining_min,
+                "eta_timestamp": eta_ts,
+                "speed_mode": speed_mode,
+                "speed_pct": speed_pct,
+                "z_thick": z_thick,
+                "image_url": image_url,
+            }
+        except Exception as e:
+            self.LOG.debug("Falha ao coletar atributos de job para %s: %s", printer_key, e)
+            return None
 
     def _collect_ace_attrs(self, printer_key: str, box_index: int) -> dict[str, Any] | None:
         pobj = self.printer_objects_by_key.get(printer_key)
