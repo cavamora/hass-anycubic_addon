@@ -188,6 +188,32 @@ class ProxyService:
         """Inicializa autenticação e carrega impressoras em um único loop."""
         await self.setup_auth()
         await self.load_printers()
+        # Logo após autenticar e descobrir impressoras, chamar o REST /v2/printer/info
+        try:
+            if self.api is not None:
+                for key, pobj in self.printer_objects_by_key.items():
+                    try:
+                        pid = getattr(pobj, "id", None)
+                        if pid is None:
+                            LOG.debug("Ignorando chamada /v2/printer/info: impressora %s sem id.", key)
+                            continue
+                        LOG.info("Chamando REST GET /v2/printer/info para impressora id=%s key=%s", pid, key)
+                        resp = await self.api.printer_info_for_id(pid, raw_data=True)
+                        try:
+                            LOG.info(
+                                "Resposta completa de /v2/printer/info (id=%s key=%s): %s",
+                                pid,
+                                key,
+                                json.dumps(resp, ensure_ascii=False),
+                            )
+                        except Exception:
+                            # Caso a resposta não seja serializável diretamente
+                            LOG.info("Resposta completa de /v2/printer/info (id=%s key=%s): %s", pid, key, resp)
+                    except Exception as e:
+                        LOG.warning("Falha ao obter /v2/printer/info para %s: %s", key, e)
+        except Exception:
+            # Não interromper bootstrap por erro de log da chamada REST
+            pass
         # Solicita informações do Ace Pro via API para acelerar estado inicial
         try:
             if self.api is not None:
