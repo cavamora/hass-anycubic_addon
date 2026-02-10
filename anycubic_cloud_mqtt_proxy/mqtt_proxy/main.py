@@ -179,6 +179,17 @@ class ProxyService:
         """Inicializa autenticação e carrega impressoras em um único loop."""
         await self.setup_auth()
         await self.load_printers()
+        # Solicita informações do Ace Pro via API para acelerar estado inicial
+        try:
+            if self.api is not None:
+                for key, pobj in self.printer_objects_by_key.items():
+                    try:
+                        LOG.info("Solicitando Ace Pro getInfo para impressora %s", key)
+                        await self.api._send_order_multi_color_box_get_info(pobj)  # type: ignore[attr-defined]
+                    except Exception as e:
+                        LOG.debug("Falha ao solicitar getInfo Ace Pro para %s: %s", key, e)
+        except Exception:
+            pass
         # Fecha a sessão HTTP para evitar warnings de sessão não fechada
         try:
             if self.session:
