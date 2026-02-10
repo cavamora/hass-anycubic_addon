@@ -56,7 +56,7 @@ class AnycubicMQTTAPI(AnycubicAPIFunctions):
     def __init__(
         self,
         *args: Any,
-        mqtt_callback_printer_update: Callable[[], None] | None = None,
+        mqtt_callback_printer_update: Callable[[str | None, str | None, str | None], None] | None = None,
         mqtt_callback_printer_busy: Callable[[], None] | None = None,
         mqtt_callback_subscribed: Callable[[], None] | None = None,
         mqtt_callback_mirror_raw_message: Callable[[str, str], None] | None = None,
@@ -67,7 +67,7 @@ class AnycubicMQTTAPI(AnycubicAPIFunctions):
         self._mqtt_log_all_messages: bool = False
         self._mqtt_connected: asyncio.Event | None = None
         self._mqtt_disconnected: asyncio.Event | None = None
-            self._mqtt_callback_printer_update: Callable[[str | None, str | None, str | None], None] | None = mqtt_callback_printer_update
+        self._mqtt_callback_printer_update: Callable[[str | None, str | None, str | None], None] | None = mqtt_callback_printer_update
         self._mqtt_callback_printer_busy: Callable[[], None] | None = mqtt_callback_printer_busy
         self._mqtt_callback_subscribed: Callable[[], None] | None = mqtt_callback_subscribed
         self._mqtt_callback_mirror_raw_message: Callable[[str, str], None] | None = mqtt_callback_mirror_raw_message
