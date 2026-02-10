@@ -50,8 +50,11 @@ class HADiscoveryPublisher:
     def _ha_sensor_state_topic(self, printer_key: str) -> str:
         return f"{self.local_prefix}/printers/{printer_key}/status"
 
-    def _ha_sensor_attrs_topic(self, printer_key: str) -> str:
-        return f"{self.local_prefix}/printers/{printer_key}/status/attrs"
+    def _ha_job_config_topic(self, printer_key: str, sensor_id: str) -> str:
+        return f"homeassistant/sensor/anycubic_{printer_key}_job_{sensor_id}/config"
+
+    def _ha_job_state_topic(self, printer_key: str, sensor_id: str) -> str:
+        return f"{self.local_prefix}/printers/{printer_key}/job/{sensor_id}"
 
     def _ha_online_config_topic(self, printer_key: str) -> str:
         return f"homeassistant/binary_sensor/anycubic_{printer_key}_online/config"
@@ -88,7 +91,6 @@ class HADiscoveryPublisher:
             "name": f"{name} Status",
             "unique_id": f"anycubic_{key}_status",
             "state_topic": self._ha_sensor_state_topic(key),
-            "json_attributes_topic": self._ha_sensor_attrs_topic(key),
             "icon": "mdi:printer-3d",
             "device": device,
         }
@@ -143,25 +145,114 @@ class HADiscoveryPublisher:
             except Exception as e:
                 self.LOG.error("Falha ao publicar discovery Ace Pro para %s: %s", key, e)
 
+            # Publica discovery dos sensores de job
+            try:
+                name = info.get("name") or info.get("model") or f"Anycubic {key}"
+                device = {
+                    "identifiers": [f"anycubic_{key}"],
+                    "name": name,
+                    "manufacturer": "Anycubic",
+                    "model": info.get("model") or "Printer",
+                }
+                job_defs = [
+                    {"id": "status", "name": f"{name} Job Status", "icon": "mdi:printer-3d"},
+                    {"id": "progress", "name": f"{name} Job Progress", "unit": "%", "icon": "mdi:progress-percent"},
+                    {"id": "current_layer", "name": f"{name} Current Layer", "icon": "mdi:layers"},
+                    {"id": "total_layers", "name": f"{name} Total Layers", "icon": "mdi:layers-outline"},
+                    {"id": "elapsed_min", "name": f"{name} Elapsed (min)", "unit": "min", "icon": "mdi:timer"},
+                    {"id": "remaining_min", "name": f"{name} Remaining (min)", "unit": "min", "icon": "mdi:timer-sand"},
+                    {"id": "eta", "name": f"{name} ETA", "device_class": "timestamp", "icon": "mdi:calendar-clock"},
+                    {"id": "speed_mode", "name": f"{name} Speed Mode", "icon": "mdi:speedometer"},
+                    {"id": "speed_pct", "name": f"{name} Speed (%)", "unit": "%", "icon": "mdi:speedometer"},
+                    {"id": "z_thick", "name": f"{name} Layer Thickness (mm)", "unit": "mm", "icon": "mdi:arrow-collapse-vertical"},
+                    {"id": "preview_url", "name": f"{name} Preview URL", "icon": "mdi:image"},
+                ]
+                for jd in job_defs:
+                    payload = {
+                        "name": jd["name"],
+                        "unique_id": f"anycubic_{key}_job_{jd['id']}",
+                        "state_topic": self._ha_job_state_topic(key, jd["id"]),
+                        "icon": jd.get("icon"),
+                        "device": device,
+                    }
+                    if "unit" in jd:
+                        payload["unit_of_measurement"] = jd["unit"]
+                    if "device_class" in jd:
+                        payload["device_class"] = jd["device_class"]
+                    topic = self._ha_job_config_topic(key, jd["id"])
+                    self.LOG.info("Publicando discovery HA (Job %s): %s", jd["id"], topic)
+                    self.local_client and self.local_client.publish(topic, json.dumps(payload), qos=0, retain=True)
+            except Exception as e:
+                self.LOG.error("Falha ao publicar discovery Job para %s: %s", key, e)
+
     def _publish_printer_status(self, printer_key: str) -> None:
         if not self.local_client:
             return
         topic = self._ha_sensor_state_topic(printer_key)
         status = self.printers_by_key.get(printer_key, {}).get("status", "unknown")
-        # Coleta e publica atributos de job
-        attrs_topic = self._ha_sensor_attrs_topic(printer_key)
-        attrs = self._collect_printer_job_attrs(printer_key)
         try:
             self.LOG.info("Atualizando estado da impressora %s: %s", printer_key, status)
             self.local_client.publish(topic, status, qos=0, retain=True)
-            if attrs is not None:
-                self.local_client.publish(attrs_topic, json.dumps(attrs), qos=0, retain=True)
         except Exception as e:
             self.LOG.error("Falha ao publicar estado %s para %s: %s", status, printer_key, e)
 
     def publish_all_printer_status(self) -> None:
         for key in self.printers_by_key.keys():
             self._publish_printer_status(key)
+
+    def _collect_job_values(self, printer_key: str) -> dict[str, Any]:
+        pobj = self.printer_objects_by_key.get(printer_key)
+        values: dict[str, Any] = {}
+        if pobj is None:
+            return values
+        try:
+            values["progress"] = getattr(pobj, "latest_project_progress_percentage", None)
+            values["elapsed_min"] = getattr(pobj, "latest_project_print_time_elapsed_minutes", None)
+            values["remaining_min"] = getattr(pobj, "latest_project_print_time_remaining_minutes", None)
+            values["total_layers"] = getattr(pobj, "latest_project_print_total_layers", None)
+            # current layer via project print_current_layer
+            current_layer = None
+            lp = getattr(pobj, "latest_project", None)
+            if lp is not None:
+                try:
+                    current_layer = lp.print_current_layer
+                except Exception:
+                    current_layer = None
+            values["current_layer"] = current_layer
+            values["speed_mode"] = getattr(pobj, "latest_project_print_speed_mode_string", None)
+            values["speed_pct"] = getattr(pobj, "latest_project_print_speed_pct", None)
+            values["z_thick"] = getattr(pobj, "latest_project_z_thick", None)
+            values["status"] = getattr(pobj, "latest_project_print_status_message", None)
+            values["preview_url"] = getattr(pobj, "latest_project_image_url", None)
+
+            # ETA como timestamp ISO8601 (UTC)
+            eta_iso = None
+            try:
+                if values["remaining_min"] is not None:
+                    eta_ts = int(time.time()) + int(values["remaining_min"]) * 60
+                    eta_iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(eta_ts))
+            except Exception:
+                eta_iso = None
+            values["eta"] = eta_iso
+        except Exception as e:
+            self.LOG.debug("Falha ao coletar valores de job para %s: %s", printer_key, e)
+        return values
+
+    def _publish_job_sensors(self, printer_key: str) -> None:
+        if not self.local_client:
+            return
+        values = self._collect_job_values(printer_key)
+        for sid, val in values.items():
+            topic = self._ha_job_state_topic(printer_key, sid)
+            try:
+                payload = "" if val is None else (json.dumps(val) if isinstance(val, (dict, list)) else str(val))
+                self.local_client.publish(topic, payload, qos=0, retain=True)
+            except Exception as e:
+                self.LOG.error("Falha ao publicar sensor Job %s para %s: %s", sid, printer_key, e)
+
+    def publish_all_job_sensors(self) -> None:
+        for key in self.printers_by_key.keys():
+            self._publish_job_sensors(key)
 
     def _collect_printer_job_attrs(self, printer_key: str) -> dict[str, Any] | None:
         pobj = self.printer_objects_by_key.get(printer_key)
@@ -333,6 +424,7 @@ class HADiscoveryPublisher:
                     pass
             self.publish_all_printer_status()
             self.publish_all_printer_online()
+            self.publish_all_job_sensors()
             # Só atualiza Ace quando vier getInfo (dados completos)
             if not (msg_type == "multiColorBox" and action != "getInfo"):
                 self.publish_all_ace()

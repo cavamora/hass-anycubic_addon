@@ -377,6 +377,11 @@ class ProxyService:
         self.ha.publish_ha_discovery()
         self.ha.publish_all_printer_status()
         self.ha.publish_all_printer_online()
+        # Publica sensores de job iniciais
+        try:
+            self.ha.publish_all_job_sensors()
+        except Exception:
+            pass
         self.ha.publish_ace_from_cache()
         self._start_anycubic_mqtt()
 
