@@ -68,6 +68,8 @@ class ProxyService:
 
         # Printer map por key
         self.printers_by_key: dict[str, dict[str, Any]] = {}
+        # Objetos de impressora para estados detalhados
+        self.printer_objects_by_key: dict[str, Any] = {}
 
     def _on_local_connect(self, client: mqtt_client.Client, userdata: Any, flags: dict[str, Any], rc: int) -> None:
         if rc == 0:
@@ -125,6 +127,7 @@ class ProxyService:
         printers = await self.api.list_my_printers(ignore_init_errors=True)
         LOG.info("Encontradas %d impressoras.", len(printers))
         self.printers_by_key.clear()
+        self.printer_objects_by_key.clear()
         for p in printers:
             if p and p.key:
                 self.printers_by_key[p.key] = {
@@ -132,7 +135,10 @@ class ProxyService:
                     "name": p.name,
                     "machine_type": p.machine_type,
                     "key": p.key,
+                    "model": getattr(p, "model", None),
+                    "status": getattr(p, "current_status", "unknown"),
                 }
+                self.printer_objects_by_key[p.key] = p
                 # Assina tópicos de status MQTT para esta impressora
                 try:
                     if self.api is not None:
@@ -162,6 +168,68 @@ class ProxyService:
                     LOG.debug("Falha ao logar detalhes da impressora %s: %s", p.key, e)
         LOG.debug("Mapa de impressoras: %s", self.printers_by_key)
 
+    def _ha_sensor_config_topic(self, printer_key: str) -> str:
+        return f"homeassistant/sensor/anycubic_{printer_key}_status/config"
+
+    def _ha_sensor_state_topic(self, printer_key: str) -> str:
+        return f"{self.local_prefix}/printers/{printer_key}/status"
+
+    def _publish_ha_discovery_for_printer(self, pinfo: dict[str, Any]) -> None:
+        if not self.local_client:
+            return
+        key = str(pinfo.get("key"))
+        name = pinfo.get("name") or pinfo.get("model") or f"Anycubic {key}"
+        device = {
+            "identifiers": [f"anycubic_{key}"],
+            "name": name,
+            "manufacturer": "Anycubic",
+            "model": pinfo.get("model") or "Printer",
+        }
+        payload = {
+            "name": f"{name} Status",
+            "unique_id": f"anycubic_{key}_status",
+            "state_topic": self._ha_sensor_state_topic(key),
+            "icon": "mdi:printer-3d",
+            "device": device,
+        }
+        topic = self._ha_sensor_config_topic(key)
+        try:
+            LOG.info("Publicando discovery HA (sensor): %s", topic)
+            self.local_client.publish(topic, json.dumps(payload), qos=0, retain=True)
+        except Exception as e:
+            LOG.error("Falha ao publicar discovery HA para %s: %s", key, e)
+
+    def publish_ha_discovery(self) -> None:
+        for key, info in self.printers_by_key.items():
+            self._publish_ha_discovery_for_printer(info)
+
+    def _publish_printer_status(self, printer_key: str) -> None:
+        if not self.local_client:
+            return
+        topic = self._ha_sensor_state_topic(printer_key)
+        status = self.printers_by_key.get(printer_key, {}).get("status", "unknown")
+        try:
+            LOG.info("Atualizando estado da impressora %s: %s", printer_key, status)
+            self.local_client.publish(topic, status, qos=0, retain=True)
+        except Exception as e:
+            LOG.error("Falha ao publicar estado %s para %s: %s", status, printer_key, e)
+
+    def publish_all_printer_status(self) -> None:
+        for key in self.printers_by_key.keys():
+            self._publish_printer_status(key)
+
+    def _on_cloud_printer_update(self) -> None:
+        # Atualiza snapshot de status e republica
+        try:
+            for key, pobj in self.printer_objects_by_key.items():
+                try:
+                    self.printers_by_key[key]["status"] = getattr(pobj, "current_status", "unknown")
+                except Exception:
+                    pass
+            self.publish_all_printer_status()
+        except Exception as e:
+            LOG.error("Erro ao processar atualização de status das impressoras: %s", e)
+
     async def _async_bootstrap(self) -> None:
         """Inicializa autenticação e carrega impressoras em um único loop."""
         await self.setup_auth()
@@ -190,6 +258,7 @@ class ProxyService:
                 # Callback para espelho de mensagens
                 if self.api is not None:
                     self.api._mqtt_callback_mirror_raw_message = self._mirror_raw_to_local
+                    self.api._mqtt_callback_printer_update = self._on_cloud_printer_update
                 # Conecta e bloqueia até encerrar
                 if self.api is not None:
                     self.api.connect_mqtt()
@@ -304,6 +373,9 @@ class ProxyService:
 
         # Prepara MQTT local e nuvem
         self._ensure_local_client()
+        # Publica discovery e estados iniciais após conectar ao broker local
+        self.publish_ha_discovery()
+        self.publish_all_printer_status()
         self._start_anycubic_mqtt()
 
         LOG.info("Proxy iniciado. Escutando nuvem e tópicos locais para repasse.")
