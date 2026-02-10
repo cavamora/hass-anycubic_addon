@@ -176,9 +176,9 @@ class ProxyService:
                     LOG.debug("Falha ao logar detalhes da impressora %s: %s", p.key, e)
         LOG.debug("Mapa de impressoras: %s", self.printers_by_key)
 
-    def _on_cloud_printer_update(self) -> None:
+    def _on_cloud_printer_update(self, printer_key: str | None, msg_type: str | None, action: str | None) -> None:
         if self.ha:
-            self.ha.update_from_cloud()
+            self.ha.update_from_cloud(msg_type=msg_type, action=action)
 
     async def _async_bootstrap(self) -> None:
         """Inicializa autenticação e carrega impressoras em um único loop."""
