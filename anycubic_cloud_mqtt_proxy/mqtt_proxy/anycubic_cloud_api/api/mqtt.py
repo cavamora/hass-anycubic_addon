@@ -185,17 +185,21 @@ class AnycubicMQTTAPI(AnycubicAPIFunctions):
                     f"{tb}"
                 )
 
+            # Extrai tipo/ação para o callback
+            msg_type = None
+            action = None
             try:
+                msg_type = payload.get('type') if isinstance(payload, dict) else None
+                action = payload.get('action') if isinstance(payload, dict) else None
                 if self._mqtt_callback_printer_update:
-                    self._mqtt_callback_printer_update()
+                    # Passa chave da impressora, tipo e ação para o callback
+                    self._mqtt_callback_printer_update(printer_key, msg_type, action)
 
                 if (
                     self._mqtt_callback_printer_busy and
                     printer_was_available and printer.is_busy
                 ):
                     self._mqtt_callback_printer_busy()
-                            # Passa chave da impressora, tipo e ação para o callback
-                            self._mqtt_callback_printer_update(printer_key, msg_type, action)
             except Exception as e:
                 tb = traceback.format_exc()
                 self._log_to_error(
