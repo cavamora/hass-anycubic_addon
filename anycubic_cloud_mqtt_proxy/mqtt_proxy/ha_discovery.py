@@ -147,6 +147,7 @@ class HADiscoveryPublisher:
                 "slots_count": mcb.total_slots,
                 "spool_info": spool_info or [],
                 "temperature": mcb.current_temperature,
+                "humidity": getattr(mcb, "current_humidity", 0),
                 "auto_feed": mcb.auto_feed,
             }
             # Drying status may be complex; include simplified if present

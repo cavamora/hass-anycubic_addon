@@ -501,6 +501,7 @@ class AnycubicMultiColorBox:
         "_loaded_slot",
         "_feed_status",
         "_temp",
+        "_humidity",
         "_drying_status",
         "_curr_nozzle_temp",
         "_target_nozzle_temp",
@@ -516,6 +517,7 @@ class AnycubicMultiColorBox:
         loaded_slot: int,
         feed_status: dict[str, Any] | None,
         temp: int,
+        humidity: int,
         drying_status: dict[str, Any] | None,
         curr_nozzle_temp: int | None,
         target_nozzle_temp: int | None,
@@ -528,6 +530,7 @@ class AnycubicMultiColorBox:
         self._loaded_slot: int = int(loaded_slot)
         self.set_feed_status(feed_status)
         self.set_current_temperature(temp)
+        self.set_current_humidity(humidity)
         self.set_drying_status(drying_status)
         self._curr_nozzle_temp: int | None = int(curr_nozzle_temp) if curr_nozzle_temp is not None else None
         self._target_nozzle_temp: int | None = int(target_nozzle_temp) if target_nozzle_temp is not None else None
@@ -540,11 +543,15 @@ class AnycubicMultiColorBox:
 
     @property
     def is_connected(self) -> bool:
-        # Force secondary box (id==1) to be treated as connected
-        if self._id == 1:
-            return True
-        # Status code 1 indicates the box is present/active
-        return self._status == 1
+        # Consider connected when status indicates presence or slots/info exist
+        try:
+            has_slots = bool(self._slots) and len(self._slots) > 0
+            has_loaded = self._loaded_slot is not None and int(self._loaded_slot) >= 0
+            has_feed = self._feed_status is not None
+            # Some firmwares report status 2 while active; treat 1 or 2 as connected
+            return bool(self._status in (1, 2) or has_slots or has_loaded or has_feed)
+        except Exception:
+            return self._status == 1
 
     def set_auto_feed(self, auto_feed: int) -> None:
         self._auto_feed = int(auto_feed)
@@ -560,6 +567,9 @@ class AnycubicMultiColorBox:
 
     def set_current_temperature(self, temp: int) -> None:
         self._temp = int(temp)
+
+    def set_current_humidity(self, humidity: int) -> None:
+        self._humidity = int(humidity)
 
     def update_slots_with_mqtt_data(self, slot_list: list[dict[str, Any]] | None) -> None:
         if slot_list is None:
@@ -615,6 +625,7 @@ class AnycubicMultiColorBox:
             loaded_slot=data['loaded_slot'],
             feed_status=data['feed_status'],
             temp=data['temp'],
+            humidity=data.get('humidity', 0),
             drying_status=data['drying_status'],
             curr_nozzle_temp=data.get('curr_nozzle_temp'),
             target_nozzle_temp=data.get('target_nozzle_temp'),
@@ -624,6 +635,10 @@ class AnycubicMultiColorBox:
     @property
     def current_temperature(self) -> int:
         return self._temp
+
+    @property
+    def current_humidity(self) -> int:
+        return getattr(self, "_humidity", 0)
 
     @property
     def box_id(self) -> int:
