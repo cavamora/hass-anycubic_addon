@@ -329,6 +329,7 @@ class ProxyService:
         self.ha.publish_ha_discovery()
         self.ha.publish_all_printer_status()
         self.ha.publish_all_printer_online()
+        self.ha.publish_all_ace()
         self._start_anycubic_mqtt()
 
         LOG.info("Proxy iniciado. Escutando nuvem e tópicos locais para repasse.")
