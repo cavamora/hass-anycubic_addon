@@ -274,18 +274,50 @@ class AnycubicPrinter:
     def _set_multi_color_box(self, multi_color_box: list[dict[str, Any]] | dict[str, Any] | None) -> None:
         self._multi_color_box: list[AnycubicMultiColorBox] | None = None
         try:
-            if multi_color_box is None or isinstance(multi_color_box, list):
-                multi_color_box_list = multi_color_box
-            else:
-                multi_color_box_list = list([multi_color_box])
-            if multi_color_box_list is not None:
-                self._multi_color_box = list()
+                # Normalize input to a list
+                if multi_color_box is None or isinstance(multi_color_box, list):
+                    multi_color_box_list = multi_color_box
+                else:
+                    multi_color_box_list = list([multi_color_box])
+
+                if multi_color_box_list is None:
+                    return
+
+                incoming_boxes: list[AnycubicMultiColorBox] = list()
                 for x in multi_color_box_list:
                     ace = AnycubicMultiColorBox.from_json(x)
                     if ace:
-                        self._multi_color_box.append(ace)
+                        incoming_boxes.append(ace)
                     else:
                         raise AnycubicDataParsingError(ErrorsDataParsing.ace.format(multi_color_box))
+
+                # If we already have boxes and incoming only has the primary (common for REST /v2/printer/info),
+                # update index 0 and preserve any existing secondary (index 1) populated via MQTT.
+                if getattr(self, "_multi_color_box", None):
+                    current = self._multi_color_box or list()
+                    if len(incoming_boxes) <= 1:
+                        # Update primary only; keep secondary as-is
+                        if len(current) > 0:
+                            # Replace/insert primary
+                            primary = incoming_boxes[0] if incoming_boxes else None
+                            if primary:
+                                current[0] = primary
+                        else:
+                            # No existing primary; set if provided
+                            if incoming_boxes:
+                                current.insert(0, incoming_boxes[0])
+                        # Preserve current beyond index 0
+                        self._multi_color_box = current
+                    else:
+                        # Incoming provides both boxes (likely MQTT getInfo); replace entirely
+                        self._multi_color_box = incoming_boxes
+                else:
+                    # No existing boxes; set from incoming.
+                    # If only one provided, keep only primary (secondary should be populated via MQTT later).
+                    if len(incoming_boxes) <= 1:
+                        self._multi_color_box = incoming_boxes
+                    else:
+                        self._multi_color_box = incoming_boxes
 
         except Exception as e:
             self._initialisation_error = True
@@ -424,8 +456,29 @@ class AnycubicPrinter:
         data: dict[str, Any],
     ) -> AnycubicPrinter:
         return cls(
-            api_parent=api_parent,
-            machine_type=data['machine_type'],
+            if multi_color_box_fw_version is None:
+                return
+
+            incoming_fw_list: list[AnycubicMachineFirmwareInfo] = list()
+            for x in multi_color_box_fw_version:
+                fw = AnycubicMachineFirmwareInfo.from_json(x)
+                if fw:
+                    incoming_fw_list.append(fw)
+
+            # Preserve secondary FW info if incoming only has primary (common for REST /v2/printer/info)
+            if getattr(self, "_multi_color_box_fw_version", None) and self._multi_color_box_fw_version:
+                current_fw = self._multi_color_box_fw_version
+                if len(incoming_fw_list) <= 1:
+                    if len(current_fw) > 0 and incoming_fw_list:
+                        current_fw[0] = incoming_fw_list[0]
+                    elif incoming_fw_list:
+                        current_fw.insert(0, incoming_fw_list[0])
+                    self._multi_color_box_fw_version = current_fw
+                else:
+                    self._multi_color_box_fw_version = incoming_fw_list
+            else:
+                # No existing FW list; set from incoming (only primary if that's all provided)
+                self._multi_color_box_fw_version = incoming_fw_list
             machine_name=data['name'],
             machine_img=data['img'],
             net_function_ids=data['net_function_ids'],
