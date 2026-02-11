@@ -391,18 +391,34 @@ class AnycubicPrinter:
         self,
         multi_color_box_fw_version: list[dict[str, Any]] | None,
     ) -> None:
-        self._multi_color_box_fw_version: list[AnycubicMachineFirmwareInfo] | None = None
         try:
-            if multi_color_box_fw_version is not None:
-                self._multi_color_box_fw_version = list()
-                for x in multi_color_box_fw_version:
-                    ace = AnycubicMachineFirmwareInfo.from_json(x)
-                    if ace:
-                        self._multi_color_box_fw_version.append(ace)
-                    else:
-                        raise AnycubicDataParsingError(
-                            ErrorsDataParsing.ace_fw_version.format(multi_color_box_fw_version)
-                        )
+            if multi_color_box_fw_version is None:
+                return
+
+            incoming_fw_list: list[AnycubicMachineFirmwareInfo] = list()
+            for x in multi_color_box_fw_version:
+                fw = AnycubicMachineFirmwareInfo.from_json(x)
+                if fw:
+                    incoming_fw_list.append(fw)
+                else:
+                    raise AnycubicDataParsingError(
+                        ErrorsDataParsing.ace_fw_version.format(multi_color_box_fw_version)
+                    )
+
+            # Preserve secondary FW info if incoming only has primary (common for REST /v2/printer/info)
+            if getattr(self, "_multi_color_box_fw_version", None) and self._multi_color_box_fw_version:
+                current_fw = self._multi_color_box_fw_version
+                if len(incoming_fw_list) <= 1:
+                    if len(current_fw) > 0 and incoming_fw_list:
+                        current_fw[0] = incoming_fw_list[0]
+                    elif incoming_fw_list:
+                        current_fw.insert(0, incoming_fw_list[0])
+                    self._multi_color_box_fw_version = current_fw
+                else:
+                    self._multi_color_box_fw_version = incoming_fw_list
+            else:
+                # No existing FW list; set from incoming (only primary if that's all provided)
+                self._multi_color_box_fw_version = incoming_fw_list
         except Exception as e:
             self._initialisation_error = True
             if not self._ignore_init_errors:
@@ -456,29 +472,8 @@ class AnycubicPrinter:
         data: dict[str, Any],
     ) -> AnycubicPrinter:
         return cls(
-            if multi_color_box_fw_version is None:
-                return
-
-            incoming_fw_list: list[AnycubicMachineFirmwareInfo] = list()
-            for x in multi_color_box_fw_version:
-                fw = AnycubicMachineFirmwareInfo.from_json(x)
-                if fw:
-                    incoming_fw_list.append(fw)
-
-            # Preserve secondary FW info if incoming only has primary (common for REST /v2/printer/info)
-            if getattr(self, "_multi_color_box_fw_version", None) and self._multi_color_box_fw_version:
-                current_fw = self._multi_color_box_fw_version
-                if len(incoming_fw_list) <= 1:
-                    if len(current_fw) > 0 and incoming_fw_list:
-                        current_fw[0] = incoming_fw_list[0]
-                    elif incoming_fw_list:
-                        current_fw.insert(0, incoming_fw_list[0])
-                    self._multi_color_box_fw_version = current_fw
-                else:
-                    self._multi_color_box_fw_version = incoming_fw_list
-            else:
-                # No existing FW list; set from incoming (only primary if that's all provided)
-                self._multi_color_box_fw_version = incoming_fw_list
+            api_parent=api_parent,
+            machine_type=data['machine_type'],
             machine_name=data['name'],
             machine_img=data['img'],
             net_function_ids=data['net_function_ids'],
